@@ -1,34 +1,20 @@
 package introdb.heap;
 
+import java.io.Serializable;
+
 class Serializer {
 
-    byte[] buffer;
-    int bufferOffsetBeyondContent = 0;
 
-    Serializer(int maxBuffer) {
-        this.buffer = new byte[maxBuffer];
+    Serializer() {
     }
 
-    void serialize(Entry entry) {
-        if (bufferOffsetBeyondContent != 0) {
-            throw new IllegalStateException("Serializer used before buffer dumped.");
-        }
+    void serialize(Entry entry, PageBuffer buffer) {
     }
 
-    int getResultSizeBytes() {
-        return 0;
+    void serialize(Serializable key, byte[] keyBuffer) {
     }
 
-    byte[] getContent() {
-        if (bufferOffsetBeyondContent == 0) {
-            throw new IllegalStateException("Retrieving content of an empty buffer");
-        }
-
-        throw new UnsupportedOperationException();
+    Entry deserialize(byte[] serialized) {
+        return null;
     }
-
-    void dumpContent() {
-        bufferOffsetBeyondContent = 0;
-    }
-
 }

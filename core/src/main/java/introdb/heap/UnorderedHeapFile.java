@@ -9,14 +9,14 @@ import java.nio.file.StandardOpenOption;
 
 class UnorderedHeapFile implements Store{
 
-	private static final int HEADER_SIZE_BYTES = 1;
+	private static final int PAGE_HEADER_SIZE_BYTES = 16;
 
 	private final Path path;
 	private final int maxNrPages;
 	private final int pageSize;
 
-	private FileChannel fileChannel;
-	private PageBuffers pageBuffers;
+	private PageBuffers writeBuffers;
+	private KeyBuffers keyBuffers;
 	private Serializer serializer;
 
 	UnorderedHeapFile(Path path, int maxNrPages, int pageSize) {
@@ -24,54 +24,62 @@ class UnorderedHeapFile implements Store{
 		this.maxNrPages = maxNrPages;
 		this.pageSize = pageSize;
 
-		pageBuffers = new PageBuffers(pageSize, HEADER_SIZE_BYTES, maxNrPages);
-		serializer = new Serializer(pageSize - HEADER_SIZE_BYTES);
+		writeBuffers = new PageBuffers(path, pageSize, PAGE_HEADER_SIZE_BYTES, maxNrPages);
+		keyBuffers = new KeyBuffers(pageSize);
+		serializer = new Serializer();
 	}
 
 	@Override
 	public void put(Entry entry) throws IOException, ClassNotFoundException {
-		if (fileChannel == null) {
-			openFile();
-		}
 
-		serializer.serialize(entry);
-		PageBuffer buffer = pageBuffers.getForAppend(serializer.getResultSizeBytes());
-		buffer.append(serializer.getContent());
-		buffer.flush();
-		serializer.dumpContent();
+		PageBuffer buffer = writeBuffers.getForAppend();
+		serializer.serialize(entry, buffer);
+		if (buffer.overflowed()) {
+			buffer.deleteLast();
+			serializer.serialize(entry, buffer);
+			if (buffer.overflowed()) {
+				throw new IllegalArgumentException("Entry overflows buffer");
+			}
+		}
+		writeBuffers.commit(buffer);
 	}
 
 	@Override
 	public Object get(Serializable key) throws IOException, ClassNotFoundException {
-		if (fileChannel == null) {
-			openFile();
-		}
+		byte[] keyBuffer = keyBuffers.getKeyBuffer();
+		PageBuffer buffer = writeBuffers.getContaining(keyBuffer);
+		byte[] serialized = buffer.entryFor(keyBuffer);
+		keyBuffers.noLongerInteresting(keyBuffer);
+		Object result = serializer.deserialize(serialized);
+		writeBuffers.noLongerInteresting(buffer);
+		return result;
 
-		throw new UnsupportedOperationException();
+
+//
+//		byte[] keyBuffer = keyBuffers.getKeyBuffer();
+//		serializer.serialize(key, keyBuffer);
+//		PageBuffer buffer = writeBuffers.getContaining(key);
+//		if (buffer == null) {
+//			return null;
+//		}
+//		byte[] serialized = buffer.entryFor(keyBuffer);
+//		keyBuffers.noLongerInteresting(keyBuffer);
+//		Object result = serializer.deserialize(serialized);
+//		writeBuffers.noLongerInteresting(buffer);
+//		return result;
 	}
 
 	public Object remove(Serializable key) throws IOException, ClassNotFoundException {
-		if (fileChannel == null) {
-			openFile();
-		}
-
-		throw new UnsupportedOperationException();
+		byte[] keyBuffer = keyBuffers.getKeyBuffer();
+		PageBuffer buffer = writeBuffers.getContaining(keyBuffer);
+		byte[] serialized = buffer.entryFor(keyBuffer);
+		Object result = serializer.deserialize(serialized);
+		buffer.delete(keyBuffer);
+		keyBuffers.noLongerInteresting(keyBuffer);
+		writeBuffers.commit(buffer);
+		return result;
 	}
 
-
-
-
-	private void openFile() {
-		if (!Files.exists(path) && Files.isReadable(path)) {
-			throw new IllegalStateException("Unable to read file " + path.toAbsolutePath());
-		}
-
-		try {
-			fileChannel = FileChannel.open(path, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
-	}
 
 }
 
